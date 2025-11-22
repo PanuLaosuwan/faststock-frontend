@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "scripts": {
     "tailwind:build": "tailwindcss -c ./tailwind.config.js -i ./src/input.css -o ./public/css/output.css --watch",
+    "build:css": "tailwindcss -c ./tailwind.config.js -i ./src/input.css -o ./public/css/output.css --minify",
     "serve": "live-server public --port=3000 --host=0.0.0.0",
     "dev": "npm run tailwind:build & npm run serve"
   },
