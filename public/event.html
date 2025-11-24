@@ -10,9 +10,98 @@
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
   <link rel="stylesheet" href="./css/dx.material.purple.dark.css">
   <script type="text/javascript" src="./js/dx.all.js"></script>
+  <script type="text/javascript">
+    function getStart(){
+      const URL = 'http://localhost:4000/api';
+
+      const ordersEvent = new DevExpress.data.CustomStore({
+        key: 'eid',
+        load() {
+          return sendRequest(`${URL}/event`);
+        },
+        insert(values) {
+          return sendRequest(`${URL}/event`, 'POST', values);
+        },
+        update(key, values) {
+          return sendRequest(`${URL}/event/${key}`, 'PATCH', values);
+        },
+        remove(key) {
+          return sendRequest(`${URL}/event/${key}`, 'DELETE', {
+            key,
+          });
+        },
+      });
+
+      $('#grid').dxDataGrid({
+        dataSource: ordersEvent,
+        repaintChangesOnly: true,
+        showBorders: true,
+        editing: {
+          refreshMode: 'reshape',
+          mode: 'cell',
+          allowAdding: true,
+          allowUpdating: true,
+          allowDeleting: true,
+        },
+        scrolling: {
+          mode: 'virtual',
+        },
+        columns: [{
+          dataField: 'ename',
+          dataType: 'text',
+          caption: 'Event Name',
+        }, {
+          dataField: 'edate_start',
+          dataType: 'date',
+          format: 'dd-MM-yyyy',
+          caption: 'Start Date',
+        }, {
+          dataField: 'edate_end',
+          dataType: 'date',
+          format: 'dd-MM-yyyy',
+          caption: 'End Date',
+        }, {
+          dataField: 'day',
+          caption: 'Day',
+        }, {
+          dataField: 'desc',
+          caption: 'Description',
+        }],
+        headerFilter: {
+          visible: true,
+        },
+        searchPanel: {
+      visible: true,
+    },
+      }).dxDataGrid('instance');
+    }
+
+    function sendRequest(url, method = 'GET', data) {
+      const d = $.Deferred();
+
+      $.ajax(url, {
+        method,
+        data: method === 'GET' ? data : JSON.stringify(data),
+        contentType: method === 'GET' ? undefined : 'application/json',
+        dataType: 'json',
+        cache: false,
+      }).done((result) => {
+        if (method === 'GET') {
+          d.resolve(result.data);          // สำหรับ load: ให้ array events
+        } else {
+          d.resolve(result.data || result); // insert/update/delete: ให้ object แถวเดียว
+        }
+      }).fail((xhr) => {
+        console.error(xhr.responseJSON || xhr.responseText);
+        d.reject(xhr.responseJSON ? xhr.responseJSON.message : xhr.statusText);
+      });
+
+      return d.promise();
+    }
+  </script>
 </head>
 
-<body class="dark:bg-gray-900 h-full">
+<body class="dark:bg-gray-900 h-full" onload="getStart()">
   <nav
     class="relative bg-gray-800/50 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-white/10">
     <div class="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8">
@@ -45,12 +134,12 @@
             <div class="flex space-x-4">
               <!-- Current: "bg-gray-950/50 text-white", Default: "text-gray-300 hover:bg-white/5 hover:text-white" -->
               <a href="#" aria-current="page"
-                class="rounded-md bg-gray-950/50 px-3 py-2 text-sm font-medium text-white">Dashboard</a>
+                class="rounded-md px-3 py-2 text-sm font-medium text-white">Dashboard</a>
               <a href="#"
                 class="rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">Management</a>
               <el-dropdown class="relative ml-3">
                 <button
-                  class="rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">
+                  class="rounded-md bg-gray-950/50 px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">
                   Setup
                 </button>
                 <el-menu anchor="bottom end" popover
@@ -63,7 +152,7 @@
                   <a href="#"
                     class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Stock</a>
                   <a href="#"
-                    class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Recipe</a>
+                    class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">User Setting</a>
                 </el-menu>
               </el-dropdown>
             </div>
@@ -110,124 +199,7 @@
   </header>
   <main class="relative">
     <div class="relative mx-auto max-w-7xl text-white py-8 px-3 sm:px-6 lg:px-8">
-      <div id="gridContainer"></div>
-      <script type="text/javascript">
-        const customers = [{
-          ID: 1,
-          CompanyName: 'Super Mart of the West',
-          Address: '702 SW 8th Street',
-          City: 'Bentonville',
-          State: 'Arkansas',
-          Zipcode: 72716,
-          Phone: '(800) 555-2797',
-          Fax: '(800) 555-2171',
-        }, {
-          ID: 2,
-          CompanyName: 'Electronics Depot',
-          Address: '2455 Paces Ferry Road NW',
-          City: 'Atlanta',
-          State: 'Georgia',
-          Zipcode: 30339,
-          Phone: '(800) 595-3232',
-          Fax: '(800) 595-3231',
-        }, {
-          ID: 3,
-          CompanyName: 'K&S Music',
-          Address: '1000 Nicllet Mall',
-          City: 'Minneapolis',
-          State: 'Minnesota',
-          Zipcode: 55403,
-          Phone: '(612) 304-6073',
-          Fax: '(612) 304-6074',
-        }, {
-          ID: 4,
-          CompanyName: "Tom's Club",
-          Address: '999 Lake Drive',
-          City: 'Issaquah',
-          State: 'Washington',
-          Zipcode: 98027,
-          Phone: '(800) 955-2292',
-          Fax: '(800) 955-2293',
-        }, {
-          ID: 5,
-          CompanyName: 'E-Mart',
-          Address: '3333 Beverly Rd',
-          City: 'Hoffman Estates',
-          State: 'Illinois',
-          Zipcode: 60179,
-          Phone: '(847) 286-2500',
-          Fax: '(847) 286-2501',
-        }, {
-          ID: 6,
-          CompanyName: 'Walters',
-          Address: '200 Wilmot Rd',
-          City: 'Deerfield',
-          State: 'Illinois',
-          Zipcode: 60015,
-          Phone: '(847) 940-2500',
-          Fax: '(847) 940-2501',
-        }, {
-          ID: 7,
-          CompanyName: 'StereoShack',
-          Address: '400 Commerce S',
-          City: 'Fort Worth',
-          State: 'Texas',
-          Zipcode: 76102,
-          Phone: '(817) 820-0741',
-          Fax: '(817) 820-0742',
-        }, {
-          ID: 8,
-          CompanyName: 'Circuit Town',
-          Address: '2200 Kensington Court',
-          City: 'Oak Brook',
-          State: 'Illinois',
-          Zipcode: 60523,
-          Phone: '(800) 955-2929',
-          Fax: '(800) 955-9392',
-        }, {
-          ID: 9,
-          CompanyName: 'Premier Buy',
-          Address: '7601 Penn Avenue South',
-          City: 'Richfield',
-          State: 'Minnesota',
-          Zipcode: 55423,
-          Phone: '(612) 291-1000',
-          Fax: '(612) 291-2001',
-        }, {
-          ID: 10,
-          CompanyName: 'ElectrixMax',
-          Address: '263 Shuman Blvd',
-          City: 'Naperville',
-          State: 'Illinois',
-          Zipcode: 60563,
-          Phone: '(630) 438-7800',
-          Fax: '(630) 438-7801',
-        }, {
-          ID: 11,
-          CompanyName: 'Video Emporium',
-          Address: '1201 Elm Street',
-          City: 'Dallas',
-          State: 'Texas',
-          Zipcode: 75270,
-          Phone: '(214) 854-3000',
-          Fax: '(214) 854-3001',
-        }, {
-          ID: 12,
-          CompanyName: 'Screen Shop',
-          Address: '1000 Lowes Blvd',
-          City: 'Mooresville',
-          State: 'North Carolina',
-          Zipcode: 28117,
-          Phone: '(800) 445-6937',
-          Fax: '(800) 445-6938',
-        }];
-        $('#gridContainer').dxDataGrid({
-          dataSource: customers,
-          keyExpr: 'ID',
-          columns: ['CompanyName', 'City', 'State', 'Phone', 'Fax'],
-          showBorders: true,
-        });
-      </script>
+      <div id="grid"></div>
     </div>
   </main>
 </body>
