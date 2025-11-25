@@ -15,25 +15,25 @@
       const URL = 'http://localhost:4000/api';
       const GRID_ID = '#grid';
       const ordersEvent = new DevExpress.data.CustomStore({
-        key: 'eid',
+        key: 'pid',
         load() {
-          return sendRequest(`${URL}/event`);
+          return sendRequest(`${URL}/products`);
         },
         insert(values) {
-          return sendRequest(`${URL}/event`, 'POST', values);
+          return sendRequest(`${URL}/products`, 'POST', values);
         },
         update(key, values) {
           const grid = $('#grid').dxDataGrid('instance');
           const items = grid.getDataSource().items();
-          const oldData = items.find(row => row.eid === key);
+          const oldData = items.find(row => row.pid === key);
 
           const fullData = { ...oldData, ...values };
-          delete fullData.eid;
+          delete fullData.pid;
 
-          return sendRequest(`${URL}/event/${key}`, 'PATCH', fullData);
+          return sendRequest(`${URL}/products/${key}`, 'PATCH', fullData);
         },
         remove(key) {
-          return sendRequest(`${URL}/event/${key}`, 'DELETE', {
+          return sendRequest(`${URL}/products/${key}`, 'DELETE', {
             key,
           });
         },
@@ -54,52 +54,47 @@
           mode: 'virtual',
         },
         columns: [{
-          width: 60,
-          allowSorting: false,
-          cellTemplate(container, options) {
-            const today = new Date();
-            const start = new Date(options.data.edate_start);
-            const end = new Date(options.data.edate_end);
-
-            // ตัดเวลาออก เหลือแค่วันที่
-            const norm = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-            const t = norm(today);
-            const s = norm(start);
-            const e = norm(end);
-
-            let color = '#9ca3af';            // เทา (default = ผ่าน End Date)
-            if (t < s) color = '#3b82f6';     // น้ำเงิน = ยังไม่ถึง Start Date
-            else if (t >= s && t <= e) color = '#22c55e';  // เขียว = อยู่ระหว่าง Start–End
-
-            $('<div>')
-              .addClass('w-3 h-3 rounded-full mx-auto')
-              .css('background-color', color)
-              .appendTo(container);
-          },
-        },{
-          dataField: 'ename',
+          dataField: 'pname',
           dataType: 'text',
-          caption: 'Event Name',
+          caption: 'Product Name',
         }, {
-          dataField: 'edate_start',
-          dataType: 'date',
-          format: 'dd-MM-yyyy',
-          caption: 'Start Date',
+          dataField: 'category',
+          caption: 'Category',
+          lookup: {
+            dataSource: ['Beer', 'Whiskey', 'Vodka', 'Alcohol', 'Wine', 'Mixer', 'Mineral', 'Water', 'Cup', 'Bucket', 'Sponsor', 'Other'],
+          },
           width: 100,
         }, {
-          dataField: 'edate_end',
-          dataType: 'date',
-          format: 'dd-MM-yyyy',
-          caption: 'End Date',
+          dataField: 'vol',
+          caption: 'Volume',
+          dataType: 'number',
           width: 100,
         }, {
-          dataField: 'day',
-          caption: 'Day',
-          width: 80,
-          allowEditing: false,
+          dataField: 'volunit',
+          caption: 'Net Volume',
+          lookup: {
+            dataSource: ['ml', 'Oz', 'Other'],
+          },
+          width: 100,
         }, {
-          dataField: 'location',
-          caption: 'Location',
+          dataField: 'unit',
+          caption: 'Unit',
+          lookup: {
+            dataSource: ['Tray', 'Pack', 'Box', 'Set', 'Other'],
+          },
+          width: 100,
+        }, {
+          dataField: 'factor',
+          caption: 'QTY/Unit',
+          dataType: 'number',
+          width: 100,
+        }, {
+          dataField: 'subunit',
+          caption: 'Sub Unit',
+          lookup: {
+            dataSource: ['Cans', 'Bottles', 'Buckets', 'Cups', 'pieces'],
+          },
+          width: 100,
         }, {
           dataField: 'desc',
           caption: 'Description',
@@ -108,8 +103,8 @@
           visible: true,
         },
         searchPanel: {
-      visible: true,
-    },
+            visible: true,
+        },
       }).dxDataGrid('instance');
     }
 
@@ -231,7 +226,7 @@
   </nav>
   <header class="relative bg-gray-800">
     <div class="relative mx-auto max-w-7xl text-white px-3 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
-      <p class="text-2xl font-bold text-white">Setup/Event</p>
+      <p class="text-2xl font-bold text-white">Setup/Product</p>
     </div>
   </header>
   <main class="relative">
