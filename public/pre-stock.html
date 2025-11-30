@@ -11,99 +11,241 @@
     <link rel="stylesheet" href="./css/dx.material.purple.dark.css">
     <script type="text/javascript" src="./js/dx.all.js"></script>
     <script type="text/javascript">
-
         function getStart() {
             const URL = 'http://localhost:4000/api';
+            const GRID_ID = '#grid';
+            let currentEid = null;   // เก็บ eid จาก selectbox
 
-            sendRequest(`${URL}/event`).then((events) => {
-                const latestEid = Math.max(...events.map(e => e.eid));
-
-                const ordersEvent = new DevExpress.data.CustomStore({
-                key: 'bid',
+            const ordersEvent = new DevExpress.data.CustomStore({
+                key: 'pid',
                 load() {
-                    return sendRequest(`${URL}/bars`);
+                    if (!currentEid) {
+                        // ยังไม่เลือก Event → คืน array ว่าง
+                        return $.Deferred().resolve([]).promise();
+                    }
+                    return sendRequest(`${URL}/prestock/byeid/${currentEid}`);
                 },
                 insert(values) {
-                    if (!values.eid && latestEid) values.eid = latestEid;
-                    return sendRequest(`${URL}/bars`, 'POST', values);
+                    if (!currentEid) {
+                        return $.Deferred()
+                        .reject('Please select Event first')
+                        .promise();
+                    }
+                    values.eid = currentEid;
+                    return sendRequest(`${URL}/prestock`, 'POST', values);
                 },
                 update(key, values) {
-                    const grid = $('#grid').dxDataGrid('instance');
+                    const grid  = $('#grid').dxDataGrid('instance');
                     const items = grid.getDataSource().items();
-                    const oldData = items.find(row => row.bid === key);
-                    const fullData = { ...oldData, ...values };
-                    delete fullData.bid;
-                    return sendRequest(`${URL}/bars/${key}`, 'PATCH', fullData);
+                    const old   = items.find(row => row.pid === key);
+
+                    const eid = currentEid;
+                    const pid = old.pid;
+
+                    // รวมค่าจากเดิม + ที่แก้
+                    const merged = { ...old, ...values };
+
+                    // สร้าง body ใหม่ เฉพาะ field ที่ต้องการส่ง
+                    const payload = {
+                        order_quantity:     merged.order_quantity,
+                        order_subquantity:  merged.order_subquantity,
+                        real_quantity:      merged.real_quantity,
+                        real_subquantity:   merged.real_subquantity,
+                        psdate:             merged.psdate,
+                        desc:               merged.desc,
+                    };
+
+                    return sendRequest(`${URL}/prestock/${eid}/${pid}`, 'PATCH', payload);
                 },
                 remove(key) {
-                    return sendRequest(`${URL}/bars/${key}`, 'DELETE');
-                },
-                });
+                    const grid = $('#grid').dxDataGrid('instance');
+                    const items = grid.getDataSource().items();
+                    const row = items.find(r => r.pid === key);
+                    const eid = row?.eid || currentEid;
+                    const pid = key;
 
-                const eventLookupStore = new DevExpress.data.CustomStore({
+                    return sendRequest(`${URL}/prestock/${eid}/${pid}`, 'DELETE');
+                },
+            });
+
+            const productStore = new DevExpress.data.CustomStore({
+                key: 'pid',
+                load() {
+                    return sendRequest(`${URL}/products`);          // คืน result.data = array products
+                },
+                byKey(key) {
+                    return sendRequest(`${URL}/products/${key}`);   // คืน product เดียว
+                },
+            });
+
+            const eventToolbarStore = new DevExpress.data.CustomStore({
                 key: 'eid',
                 load() {
-                    return events;
+                    return sendRequest(`${URL}/event`);    // ให้ sendRequest คืน result.data
                 },
-                byKey(key) {
-                    return sendRequest(`${URL}/event/${key}`);
-                },
-                });
+            });
 
-                const userLookupStore = new DevExpress.data.CustomStore({
-                key: 'uid',
-                load() {
-                    return sendRequest(`${URL}/user`);
-                },
-                byKey(key) {
-                    return sendRequest(`${URL}/user/${key}`);
-                },
-                });
-
-                $('#grid').dxDataGrid({
+            $('#grid').dxDataGrid({
                 dataSource: ordersEvent,
                 repaintChangesOnly: false,
                 showBorders: true,
-                editing: { refreshMode: 'reshape', mode: 'cell', allowAdding: true, allowUpdating: true, allowDeleting: true },
-                scrolling: { mode: 'virtual' },
-
-                onInitNewRow(e) {
-                    if (latestEid) e.data.eid = latestEid;
+                editing: {
+                    refreshMode: 'reshape',
+                    mode: 'popup',
+                    allowAdding: true,
+                    allowUpdating: true,
+                    allowDeleting: true,
+                    popup: {
+                        title: 'Pre-Stock',
+                        showTitle: true,
+                        width: 800,
+                        height: 600,
+                    },
+                    form: {
+                        colCount: 2,
+                        items: [{
+                            itemType: 'group',
+                            colSpan: 2,
+                            colCount: 1,
+                            items: [{
+                                dataField: 'pid',
+                                label: { text: 'Product' },
+                                editorType: 'dxSelectBox',
+                                editorOptions: {
+                                    dataField: 'pid',
+                                    label: { text: 'Product' },
+                                    editorType: 'dxSelectBox',
+                                    editorOptions: {
+                                        dataSource: productStore,
+                                        valueExpr: 'pid',
+                                        displayExpr(item) {
+                                        if (!item) return '';
+                                        const { pname, category, vol, volunit, factor, subunit, unit } = item;
+                                        return `${pname} (ประเภท: ${category}, ${vol ?? ''} ${volunit ?? ''}, ${factor ?? ''} ${subunit ?? ''} / ${unit ?? ''})`;
+                                        },
+                                        searchEnabled: true,
+                                        // ไม่มี onValueChanged ก่อน ลองให้เลือกได้ก่อน
+                                    },
+                                },
+                            }],
+                        }, {
+                            itemType: 'group',
+                            colSpan: 2,
+                            colCount: 2,
+                            items: [
+                                { dataField: 'order_quantity',    label: { text: 'Order (Tray/Box)'  }, editorType: 'dxNumberBox' },
+                                { dataField: 'order_subquantity', label: { text: 'Order (เศษ)'}, editorType: 'dxNumberBox' },
+                                { dataField: 'real_quantity',     label: { text: 'Real (Tray/Box)'     }, editorType: 'dxNumberBox' },
+                                { dataField: 'real_subquantity',  label: { text: 'Real (เศษ)' }, editorType: 'dxNumberBox' },
+                                {
+                                dataField: 'psdate',
+                                label: { text: 'Shipment' },
+                                editorType: 'dxDateBox',
+                                editorOptions: { type: 'date', displayFormat: 'dd-MM-yyyy' },
+                                },
+                                {
+                                dataField: 'note',
+                                label: { text: 'Note' },
+                                editorType: 'dxTextBox',
+                                colSpan: 2,                // textarea กินเต็มฟอร์ม
+                                editorOptions: {
+                                    minHeight: 80,
+                                },
+                                },
+                            ],
+                        },],
+                    },
                 },
+                onToolbarPreparing(e) {
+                    e.toolbarOptions.items.unshift({
+                        location: 'before',
+                        widget: 'dxSelectBox',
+                        options: {
+                            width: 260,
+                            dataSource: eventToolbarStore,
+                            valueExpr: 'eid',
+                            displayExpr: 'ename',
+                            placeholder: 'Select Event',
 
+                            // เลือก event แล้วเปลี่ยน filter
+                            onValueChanged(ev) {
+                            currentEid = ev.value || null;
+                            const grid = $(GRID_ID).dxDataGrid('instance');
+                            grid.refresh();
+                            },
+
+                            // ครั้งแรก: auto เลือก eid ล่าสุด แล้วโหลดตาราง
+                            onInitialized(ev) {
+                            const ds = ev.component.getDataSource();
+                            ds.load().done((items) => {
+                                if (!items || !items.length) return;
+                                const latestEid = Math.max(...items.map(i => i.eid));
+                                currentEid = latestEid;
+                                ev.component.option('value', latestEid);
+
+                                const grid = $(GRID_ID).dxDataGrid('instance');
+                                grid.refresh();
+                            });
+                            },
+                        },
+                    });
+                },
+                scrolling: {
+                    mode: 'virtual',
+                },
                 columns: [{
-                    dataField: 'bcode',
-                    caption: 'Bar Name',
-                    sortOrder: 'asc',
-                    sortIndex: 0,
-                }, {
-                    dataField: 'uid',
-                    caption: 'Head',
-                    lookup: {
-                    dataSource: userLookupStore,
-                    valueExpr: 'uid',
-                    displayExpr: 'uname',
-                    },
-                }, {
                     dataField: 'eid',
-                    caption: 'Event',
-                    filterValues: latestEid ? [latestEid] : null,   // เลือก event ล่าสุดไว้ใน header filter
+                    visible: false,
+                }, {
+                    dataField: 'pid',
+                    caption: 'Product',
                     lookup: {
-                    dataSource: eventLookupStore,
-                    valueExpr: 'eid',
-                    displayExpr: 'ename',
+                        dataSource: productStore,
+                        valueExpr: 'pid',
+                        displayExpr(item) {
+                            if (!item) return '';
+                            const { pname, category, vol, volunit, factor, subunit, unit } = item;
+                            return `${pname} (ประเภท: ${category}, ${vol ?? ''} ${volunit ?? ''}, ${factor ?? ''} ${subunit ?? ''} / ${unit ?? ''})`;
+                        },
                     },
+                }, {
+                    dataField: 'order_quantity',
+                    caption: 'Order (Tray/Box)',
+                    width: 150,
+                }, {
+                    dataField: 'order_subquantity',
+                    caption: 'Order (เศษ)',
+                    width: 110,
+                }, {
+                    dataField: 'real_quantity',
+                    caption: 'Real (Tray/Box)',
+                    width: 150,
+                }, {
+                    dataField: 'real_subquantity',
+                    caption: 'Real (เศษ)',
+                    width: 110,
+                }, {
+                    dataField: 'psdate',
+                    dataType: 'date',
+                    format: 'dd-MM-yyyy',
+                    caption: 'Shipment',
+                    width: 100,
                 }, {
                     dataField: 'desc',
                     caption: 'Description',
-                }],
-                headerFilter: { visible: true },
-                searchPanel: { visible: true },
-                }).dxDataGrid('instance');
-            });
-            }
-
-
+                    width: 150,
+                }, {
+                    dataField: 'productSummary', 
+                    visible: false
+                },],
+                headerFilter: {
+                    visible: true,
+                },
+                searchPanel: {
+                    visible: true,
+                },
+            }).dxDataGrid('instance');
+        }
 
         function sendRequest(url, method = 'GET', data) {
             const d = $.Deferred();
@@ -230,7 +372,7 @@
     </nav>
     <header class="relative bg-gray-800">
         <div class="relative mx-auto max-w-7xl text-white px-3 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
-            <p class="text-2xl font-bold text-white">Setup/Bar</p>
+            <p class="text-2xl font-bold text-white">Setup/Pre-Stock</p>
         </div>
     </header>
     <main class="relative">
