@@ -307,8 +307,19 @@
                             <!-- Current: "bg-gray-950/50 text-white", Default: "text-gray-300 hover:bg-white/5 hover:text-white" -->
                             <a href="#" aria-current="page"
                                 class="rounded-md px-3 py-2 text-sm font-medium text-white">Dashboard</a>
-                            <a href="#"
-                                class="rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">Management</a>
+                            <el-dropdown class="relative ml-3">
+                                <button
+                                    class="rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">
+                                    Management
+                                </button>
+                                <el-menu anchor="bottom end" popover
+                                    class="m-0 w-48 origin-top-right rounded-md bg-gray-800 p-0 py-1 outline outline-1 -outline-offset-1 outline-white/10 transition [--anchor-gap:theme(spacing.2)] [transition-behavior:allow-discrete] data-[closed]:scale-95 data-[closed]:transform data-[closed]:opacity-0 data-[enter]:duration-100 data-[leave]:duration-75 data-[enter]:ease-out data-[leave]:ease-in">
+                                    <a href="record.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Record</a>
+                                    <a href="overview.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Overview</a>
+                                </el-menu>
+                            </el-dropdown>
                             <el-dropdown class="relative ml-3">
                                 <button
                                     class="rounded-md bg-gray-950/50 px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">

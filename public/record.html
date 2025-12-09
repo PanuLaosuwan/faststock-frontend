@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+
+<head class="h-full bg-gray-900">
+    <title>Faststock</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="./css/output.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="./css/dx.material.purple.dark.css">
+    <style>
+        .dx-datagrid .dx-row > td,
+        .dx-datagrid .dx-datagrid-headers .dx-row > td {
+            border-right: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        .dx-datagrid .dx-datagrid-headers .dx-row > td:last-child,
+        .dx-datagrid .dx-row > td:last-child {
+            border-right: none;
+        }
+
+        .dx-datagrid .dx-header-row .prestock-band {
+            background-color: #6b21a8;
+            color: #fff;
+        }
+
+        .dx-datagrid .dx-data-row td.prestock-cell {
+            background-color: rgba(107, 33, 168, 0.15);
+        }
+    </style>
+    <script type="text/javascript" src="./js/dx.all.js"></script>
+    <script type="text/javascript">
+        function getStart() {
+            const URL = 'http://localhost:4000/api';
+            const GRID_ID = '#grid';
+            const TABS_ID = '#tabs';
+            const EVENT_SELECT_ID = '#event-select';
+
+            let currentEid = null;
+            let currentTab = null;
+            let inventoryRaw = null;
+            let eventOptions = [];
+            let eventSelectBox = null;
+            let eventsPromise = null;
+            let currentPivotData = [];
+            let currentDateMap = {};
+            let currentBid = null;
+
+            function loadInventory(eid) {
+                if (!eid) {
+                    inventoryRaw = null;
+                    updateTabs([]);
+                    updateGrid();
+                    return;
+                }
+
+                sendRequest(`${URL}/event/inventory/${eid}`).then((data) => {
+                    inventoryRaw = data; // { prestock, C1, C2, "Main Stock", ... }
+                    const tabItems = Object.keys(data).filter((k) => k !== 'prestock');
+                    updateTabs(tabItems);
+                    updateGrid();
+                });
+            }
+
+            function updateTabs(items) {
+                const tabs = $(TABS_ID).dxTabs('instance');
+                if (!items.length) {
+                    currentTab = null;
+                    if (tabs) {
+                        tabs.option({ items: [], selectedItem: null });
+                    }
+                    return;
+                }
+
+                if (!items.includes(currentTab)) {
+                    currentTab = items[0];
+                }
+
+                if (tabs) {
+                    tabs.option({
+                        items,
+                        selectedItem: currentTab,
+                    });
+                }
+            }
+
+            const sanitizeLabel = (label) => {
+                const base = label || 'No Date';
+                const cleaned = base.replace(/[^a-zA-Z0-9]/g, '_');
+                return cleaned || 'date';
+            };
+
+            function buildPivot(raw, tabName) {
+                const dateOrder = [];
+                const seen = new Set();
+                const dateMap = {};
+
+                raw.forEach((row) => {
+                    const label = row.date || 'No Date';
+                    if (!seen.has(label)) {
+                        seen.add(label);
+                        dateOrder.push(label);
+                    }
+                });
+
+                const rowsByPid = {};
+                raw.forEach((row, idx) => {
+                    const label = row.date || 'No Date';
+                    const suffix = sanitizeLabel(label);
+                    const key = row.pid != null ? row.pid : `${row.pname || ''}-${idx}`;
+                    if (!rowsByPid[key]) {
+                        rowsByPid[key] = {
+                            rowId: `${tabName}-${key}`,
+                            pid: row.pid,
+                            pname: row.pname,
+                            bid: row.bid ?? null,
+                            bcode: row.bcode ?? tabName,
+                        };
+                    }
+                    const target = rowsByPid[key];
+                    target[`start_qty_${suffix}`] = row.start_qty;
+                    target[`end_qty_${suffix}`] = row.end_qty;
+                    target[`start_subqty_${suffix}`] = row.start_subqty;
+                    target[`end_subqty_${suffix}`] = row.end_subqty;
+                });
+
+                const bands = dateOrder.map((label) => {
+                    const suffix = sanitizeLabel(label);
+                    dateMap[suffix] = label;
+                    return {
+                        caption: label,
+                        alignment: 'center',
+                        columns: [
+                            { dataField: `start_qty_${suffix}`, caption: 'start_qty', dataType: 'number', width: 100 },
+                            { dataField: `start_subqty_${suffix}`, caption: 'start_subqty', dataType: 'number', width: 100 },
+                            { dataField: `end_qty_${suffix}`, caption: 'end_qty', dataType: 'number', width: 100 },
+                            { dataField: `end_subqty_${suffix}`, caption: 'end_subqty', dataType: 'number', width: 100 },
+                        ],
+                    };
+                });
+
+                return {
+                    data: Object.values(rowsByPid),
+                    bands,
+                    dateMap,
+                };
+            }
+
+            function updateGrid() {
+                const grid = $(GRID_ID).dxDataGrid('instance');
+                if (!grid) return;
+
+                if (!inventoryRaw || !currentTab || !inventoryRaw[currentTab]) {
+                    grid.option({
+                        dataSource: [],
+                        columns: [
+                            { dataField: 'pname', caption: 'Product', width: 200, fixed: true, allowEditing: false },
+                        ],
+                    });
+                    return;
+                }
+
+                const raw = inventoryRaw[currentTab];
+                const tabRows = Array.isArray(raw) ? raw : [];
+                currentBid = tabRows.find((row) => row && row.bid != null)?.bid ?? null;
+                const pivot = buildPivot(raw, currentTab);
+
+                const prestockData = (inventoryRaw.prestock || []).reduce((acc, row) => {
+                    if (row.pid != null) {
+                        acc[row.pid] = row;
+                    } else if (row.pname) {
+                        acc[row.pname] = row;
+                    }
+                    return acc;
+                }, {});
+
+                const dataWithPrestock = pivot.data.map((item) => {
+                    const prestockRow =
+                        (item.pid != null ? prestockData[item.pid] : undefined) || prestockData[item.pname];
+                    if (prestockRow) {
+                        return {
+                            ...item,
+                            prestock_end_qty: prestockRow.end_qty,
+                            prestock_end_subqty: prestockRow.end_subqty,
+                        };
+                    }
+                    return item;
+                });
+
+                const columns = [
+                    { dataField: 'pname', caption: 'Product', allowEditing: false, width: 200, fixed: true },
+                    {
+                        caption: 'Prestock',
+                        alignment: 'center',
+                        fixed: true,
+                        cssClass: 'prestock-band',
+                        columns: [
+                            { dataField: 'prestock_end_qty', caption: 'ยอดลง', allowEditing: false, dataType: 'number', width: 100, fixed: true, cssClass: 'prestock-cell' },
+                            { dataField: 'prestock_end_subqty', caption: 'เศษ', allowEditing: false, dataType: 'number', width: 100, fixed: true, cssClass: 'prestock-cell' },
+                        ],
+                    },
+                    ...pivot.bands,
+                ];
+
+                currentPivotData = dataWithPrestock;
+                currentDateMap = pivot.dateMap || {};
+
+                grid.option({
+                    keyExpr: 'rowId',
+                    dataSource: dataWithPrestock,
+                    columns,
+                    editing: {
+                        allowUpdating: true,
+                        allowAdding: false,
+                        allowDeleting: false,
+                        mode: 'cell',
+                    },
+                });
+            }
+
+            function loadEvents() {
+                if (!eventsPromise) {
+                    eventsPromise = sendRequest(`${URL}/event`).then((events) => {
+                        eventOptions = events || [];
+                        if (!currentEid && eventOptions.length) {
+                            currentEid = Math.max(...eventOptions.map((i) => i.eid));
+                        }
+                        if (eventSelectBox) {
+                            eventSelectBox.option('dataSource', eventOptions);
+                            if (currentEid) {
+                                eventSelectBox.option('value', currentEid);
+                            }
+                        }
+                        if (currentEid) {
+                            loadInventory(currentEid);
+                        }
+                        return eventOptions;
+                    });
+                }
+                return eventsPromise;
+            }
+
+            // initialise tabs (will be populated after first inventory load)
+            $(TABS_ID).dxTabs({
+                items: [],
+                selectedItem: null,
+                onSelectionChanged(e) {
+                    const added = Array.isArray(e.addedItems) ? e.addedItems : [];
+                    if (!added.length) return;
+                    currentTab = added[0];
+                    updateGrid();
+                },
+            });
+
+            // event select (outside grid)
+            $(EVENT_SELECT_ID).dxSelectBox({
+                width: 260,
+                dataSource: eventOptions,
+                valueExpr: 'eid',
+                displayExpr: 'ename',
+                placeholder: 'Select Event',
+                onInitialized(ev) {
+                    eventSelectBox = ev.component;
+                    ev.component.option('dataSource', eventOptions);
+                    if (currentEid) {
+                        ev.component.option('value', currentEid);
+                    }
+                },
+                onValueChanged(ev) {
+                    currentEid = ev.value || null;
+                    loadInventory(currentEid);
+                },
+            });
+
+            const handleBulkUpdate = (changes) => {
+                if (!changes || !changes.length) {
+                    return;
+                }
+                if (!currentBid) {
+                    console.warn('No bid available for current tab. Skipping bulk update.');
+                    return;
+                }
+                const itemsMap = {};
+                const dataMap = currentPivotData.reduce((acc, row) => {
+                    acc[row.rowId] = row;
+                    return acc;
+                }, {});
+
+                changes.forEach((change) => {
+                    const row = dataMap[change.key];
+                    if (!row || !change.data) return;
+                    Object.keys(change.data).forEach((field) => {
+                        const match = field.match(/^(start_qty|start_subqty|end_qty|end_subqty)_(.+)$/);
+                        if (!match) return;
+                        const metric = match[1];
+                        const suffix = match[2];
+                        const sdate = currentDateMap[suffix] || suffix;
+                        const key = `${row.pid}|${sdate}`;
+                        if (!itemsMap[key]) {
+                            itemsMap[key] = {
+                                pid: row.pid,
+                                sdate,
+                                start_quantity: row[`start_qty_${suffix}`] ?? null,
+                                start_subquantity: row[`start_subqty_${suffix}`] ?? null,
+                                end_quantity: row[`end_qty_${suffix}`] ?? null,
+                                end_subquantity: row[`end_subqty_${suffix}`] ?? null,
+                            };
+                        }
+                        const item = itemsMap[key];
+                        const newValue = change.data[field];
+                        if (metric === 'start_qty') item.start_quantity = newValue;
+                        if (metric === 'start_subqty') item.start_subquantity = newValue;
+                        if (metric === 'end_qty') item.end_quantity = newValue;
+                        if (metric === 'end_subqty') item.end_subquantity = newValue;
+                    });
+                });
+
+                const items = Object.values(itemsMap);
+                if (!items.length) {
+                    return;
+                }
+
+                sendRequest(`${URL}/stock/bulk`, 'POST', {
+                    bid: currentBid,
+                    items,
+                })
+                    .then(() => {
+                        if (currentEid) {
+                            loadInventory(currentEid);
+                        }
+                    })
+                    .catch((error) => {
+                        console.error('Bulk update failed', error);
+                    });
+            };
+
+            $('#grid').dxDataGrid({
+                dataSource: [],
+                keyExpr: 'rowId',
+                repaintChangesOnly: false,
+                showBorders: true,
+                editing: {
+                    mode: 'cell',
+                    allowUpdating: true,
+                    allowAdding: false,
+                    allowDeleting: false,
+                },
+                columnWidth: 100,
+                columnFixing: {
+                    enabled: true,
+                },
+                scrolling: {
+                    mode: 'virtual',
+                    columnRenderingMode: 'virtual',
+                },
+                columns: [
+                    { dataField: 'pname', caption: 'Product', width: 200, fixed: true },
+                ],
+                headerFilter: { visible: true },
+                searchPanel: { visible: true },
+                rowAlternationEnabled: false,
+                columnLines: true,
+                rowLines: true,
+                onSaved(e) {
+                    handleBulkUpdate(e.changes);
+                },
+            }).dxDataGrid('instance');
+
+            loadEvents();
+        }
+
+        function sendRequest(url, method = 'GET', data) {
+            const d = $.Deferred();
+            $.ajax(url, {
+                method,
+                data: method === 'GET' ? data : JSON.stringify(data),
+                contentType: method === 'GET' ? undefined : 'application/json',
+                dataType: 'json',
+                cache: false,
+            }).done((result) => {
+                d.resolve(result.data);
+            }).fail((xhr) => {
+                console.error(xhr.responseJSON || xhr.responseText);
+                d.reject(xhr.responseJSON ? xhr.responseJSON.message : xhr.statusText);
+            });
+            return d.promise();
+        }
+    </script>
+
+</head>
+
+<body class="dark:bg-gray-900 h-full" onload="getStart()">
+    <nav
+        class="relative bg-gray-800/50 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-white/10">
+        <div class="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8">
+            <div class="relative flex h-16 items-center justify-between">
+                <div class="absolute inset-y-0 left-0 flex items-center sm:hidden">
+                    <!-- Mobile menu button-->
+                    <button type="button" command="--toggle" commandfor="mobile-menu"
+                        class="relative inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-white/5 hover:text-white focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-indigo-500">
+                        <span class="absolute -inset-0.5"></span>
+                        <span class="sr-only">Open main menu</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon"
+                            aria-hidden="true" class="size-6 [[aria-expanded='true']_&]:hidden">
+                            <path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                        </svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon"
+                            aria-hidden="true" class="size-6 [&:not([aria-expanded='true']_*)]:hidden">
+                            <path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
+                    <div class="flex shrink-0 items-center">
+                        <img src="https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500"
+                            alt="Your Company" class="h-8 w-auto" />
+                    </div>
+
+                </div>
+                <div class="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
+                    <div class="hidden sm:ml-6 sm:block">
+                        <div class="flex space-x-4">
+                            <!-- Current: "bg-gray-950/50 text-white", Default: "text-gray-300 hover:bg-white/5 hover:text-white" -->
+                            <a href="#" aria-current="page"
+                                class="rounded-md px-3 py-2 text-sm font-medium text-white">Dashboard</a>
+                            <el-dropdown class="relative ml-3">
+                                <button
+                                    class="rounded-md bg-gray-950/50 px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">
+                                    Management
+                                </button>
+                                <el-menu anchor="bottom end" popover
+                                    class="m-0 w-48 origin-top-right rounded-md bg-gray-800 p-0 py-1 outline outline-1 -outline-offset-1 outline-white/10 transition [--anchor-gap:theme(spacing.2)] [transition-behavior:allow-discrete] data-[closed]:scale-95 data-[closed]:transform data-[closed]:opacity-0 data-[enter]:duration-100 data-[leave]:duration-75 data-[enter]:ease-out data-[leave]:ease-in">
+                                    <a href="record.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Record</a>
+                                    <a href="overview.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Overview</a>
+                                </el-menu>
+                            </el-dropdown>
+                            <el-dropdown class="relative ml-3">
+                                <button
+                                    class="rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:bg-white/5 hover:text-white">
+                                    Setup
+                                </button>
+                                <el-menu anchor="bottom end" popover
+                                    class="m-0 w-48 origin-top-right rounded-md bg-gray-800 p-0 py-1 outline outline-1 -outline-offset-1 outline-white/10 transition [--anchor-gap:theme(spacing.2)] [transition-behavior:allow-discrete] data-[closed]:scale-95 data-[closed]:transform data-[closed]:opacity-0 data-[enter]:duration-100 data-[leave]:duration-75 data-[enter]:ease-out data-[leave]:ease-in">
+                                    <a href="event.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Event</a>
+                                    <a href="product.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Product</a>
+                                    <a href="bar.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Bar</a>
+                                    <a href="pre-stock.html"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Pre-Stock</a>
+                                    <a href="#"
+                                        class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">User
+                                        Setting</a>
+                                </el-menu>
+                            </el-dropdown>
+                        </div>
+                    </div>
+                    <!-- Profile dropdown -->
+                    <el-dropdown class="relative ml-3">
+                        <button
+                            class="relative flex rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+                            <span class="absolute -inset-1.5"></span>
+                            <span class="sr-only">Open user menu</span>
+                            <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+                                alt=""
+                                class="size-8 rounded-full bg-gray-800 outline outline-1 -outline-offset-1 outline-white/10" />
+                        </button>
+
+                        <el-menu anchor="bottom end" popover
+                            class="m-0 w-48 origin-top-right rounded-md bg-gray-800 p-0 py-1 outline outline-1 -outline-offset-1 outline-white/10 transition [--anchor-gap:theme(spacing.2)] [transition-behavior:allow-discrete] data-[closed]:scale-95 data-[closed]:transform data-[closed]:opacity-0 data-[enter]:duration-100 data-[leave]:duration-75 data-[enter]:ease-out data-[leave]:ease-in">
+                            <a href="#"
+                                class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Your
+                                profile</a>
+                            <a href="#"
+                                class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Settings</a>
+                            <a href="#"
+                                class="block px-4 py-2 text-sm text-gray-300 focus:bg-white/5 focus:outline-none">Sign
+                                out</a>
+                        </el-menu>
+                    </el-dropdown>
+                </div>
+            </div>
+        </div>
+
+        <el-disclosure id="mobile-menu" hidden class="sm:hidden [&:not([hidden])]:block">
+            <div class="space-y-1 px-2 pb-3 pt-2">
+                <!-- Current: "bg-gray-950/50 text-white", Default: "text-gray-300 hover:bg-white/5 hover:text-white" -->
+                <a href="#" aria-current="page"
+                    class="block rounded-md bg-gray-950/50 px-3 py-2 text-base font-medium text-white">Dashboard</a>
+                <a href="#"
+                    class="block rounded-md px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white">Management</a>
+                <a href="#"
+                    class="block rounded-md px-3 py-2 text-base font-medium text-gray-300 hover:bg-white/5 hover:text-white">Setup</a>
+            </div>
+        </el-disclosure>
+    </nav>
+    <header class="relative bg-gray-800">
+        <div class="relative mx-auto max-w-7xl text-white px-3 sm:px-6 lg:px-8 flex h-16 items-center justify-between">
+            <p class="text-2xl font-bold text-white">Management/Record</p>
+        </div>
+    </header>
+    <main class="relative">
+        <div class="relative mx-auto max-w-7xl text-white py-8 px-3 sm:px-6 lg:px-8">
+            <div class="flex flex-wrap items-center gap-3 mb-4">
+                <div class="w-full md:w-auto">
+                    <div id="event-select"></div>
+                </div>
+                <div class="flex-1 min-w-48" id="tabs"></div>
+            </div>
+            <div id="grid"></div>
+        </div>
+    </main>
+</body>
+
+</html>

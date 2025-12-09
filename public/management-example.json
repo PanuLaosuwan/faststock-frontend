@@ -1,0 +1,22 @@
+{
+    "eid": 1,
+    "bid": 1,
+    "pid": 1,
+    "bcode": "C1",
+    "data": [
+        {
+        "date": "2024-06-15",
+        "start_qty": 100,
+        "end_qty": 80,
+        "start_subqty": 1,
+        "end_subqty": 0
+        },
+        {
+        "date": "2024-06-15",
+        "start_qty": 100,
+        "end_qty": 80,
+        "start_subqty": 1,
+        "end_subqty": 0
+        }
+    ]
+}
