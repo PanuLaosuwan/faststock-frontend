@@ -321,9 +321,23 @@
                     return;
                 }
 
+                const toNumberOrNull = (value) => {
+                    if (value === '' || value === null || value === undefined) return null;
+                    const num = Number(value);
+                    return Number.isNaN(num) ? null : num;
+                };
+
+                const normalizedItems = items.map((item) => ({
+                    ...item,
+                    start_quantity: toNumberOrNull(item.start_quantity),
+                    start_subquantity: toNumberOrNull(item.start_subquantity),
+                    end_quantity: toNumberOrNull(item.end_quantity),
+                    end_subquantity: toNumberOrNull(item.end_subquantity),
+                }));
+
                 sendRequest(`${URL}/stock/bulk`, 'POST', {
                     bid: currentBid,
-                    items,
+                    items: normalizedItems,
                 })
                     .then(() => {
                         if (currentEid) {
